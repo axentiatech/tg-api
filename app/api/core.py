@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException, Path
 import os
 import json
-import base64
 from azure.core.credentials import AzureKeyCredential
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import AnalyzeResult
@@ -9,6 +8,7 @@ from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
 from azure.ai.documentintelligence.models import ContentFormat
 import pathlib
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 
 def create_html_table(json_data):
@@ -100,9 +100,6 @@ load_dotenv()
 
 current_file = pathlib.Path(__file__).parent.parent.parent
 
-# workaround for now
-pdf_path = current_file / "app/api/pre-board.pdf"
-
 
 # set `<your-endpoint>` and `<your-key>` variables with the values from the Azure portal
 key = os.getenv("AZURE_KEY")
@@ -126,19 +123,16 @@ def _in_span(word, spans):
     return False
 
 
-def analyze_layout():
+def analyze_layout(pdf_url: str):
     # sample document
-    # formUrl = "https://raw.githubusercontent.com/Azure-Samples/cognitive-services-REST-api-samples/master/curl/form-recognizer/sample-layout.pdf"
-    # file_bytes = open('/content/Al.Noor_GPAReports (2) (1).pdf', 'rb')
 
     document_intelligence_client = DocumentIntelligenceClient(
         endpoint=endpoint, credential=AzureKeyCredential(key)
     )
 
-    # TODO: fetch content from a signed url
     poller = document_intelligence_client.begin_analyze_document(
-        "prebuilt-layout", analyze_request={'base64Source': base64.b64encode(open(pdf_path, 'rb').read()).decode("utf-8")},
-    )
+        "prebuilt-layout", AnalyzeDocumentRequest(url_source=pdf_url
+                                                  ))
 
     result: AnalyzeResult = poller.result()
 
@@ -199,10 +193,14 @@ def analyze_layout():
     return json_data
 
 
-@router.post("/")
-async def evaluate():
+class Payload(BaseModel):
+    pdf_url: str
 
-    result = analyze_layout()
+
+@router.post("/")
+async def evaluate(payload: Payload):
+
+    result = analyze_layout(payload.pdf_url)
 
     # with open("result.json", "w") as t:
     #     json.dump(result, t)
