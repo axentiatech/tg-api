@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from openai import OpenAI
 from app.api.lib.idp import analyze_layout
 from app.api.lib.parseToHtml import get_tables
-
+from fastapi import HTTPException
 
 client = OpenAI()
 
@@ -41,6 +41,10 @@ class ExtractedTable(BaseModel):
 
 class ExtractedOutput(BaseModel):
     data: list[ExtractedTable]
+
+
+class IsMultipleGradingScale(BaseModel):
+    is_multiple_grading_scale: bool
 
 
 @router.post("/")
@@ -88,8 +92,36 @@ async def evaluate(payload: Payload):
 
     extracted_tables = []
 
+    # check only if the number of marks table is more than 1 using the the key "is_marks_table"
+    if len([table for table in response.choices[0].message.parsed.tables if table.is_marks_table]) > 1:
+        raise HTTPException(
+            status_code=500, detail="We are not able to process this transcript")
+
     for table in response.choices[0].message.parsed.tables:
         if table.is_marks_table:
+
+            # check if the table has mulitple grading scales or result of multiple years in the same table
+            is_multiple_grading_scale = client.beta.chat.completions.parse(
+                model="gpt-4o",
+                messages=[{
+                    "role": "system",
+                    "content": """
+                    You are an intelligent AI agent that can check if the table has mulitple grading scales or result of multiple years in the same table
+                    For example, if the table has the following content with multiple grading scales of a single country:
+                    eg: Having GSCE and IGCSE in the same table , or having result of 2024 and 2025 in the same table , or having 9th , 10th and more grade in the same table.
+                    Just return true if the table has multiple grading scales or result of multiple years in the same table.
+                    """
+                }, {
+                    "role": "user",
+                    "content": table.table_content
+                }],
+                response_format=IsMultipleGradingScale
+            )
+
+            if is_multiple_grading_scale.choices[0].message.parsed.is_multiple_grading_scale:
+                raise HTTPException(
+                    status_code=500, detail="We are not able to process this table")
+
             marks_table = client.beta.chat.completions.parse(
                 model="gpt-4o",
                 messages=[{
@@ -112,5 +144,9 @@ async def evaluate(payload: Payload):
 
             extracted_tables.extend(
                 marks_table.choices[0].message.parsed.data)
+
+    if len(extracted_tables) == 0:
+        raise HTTPException(
+            status_code=500, detail="We are not able to process this transcript")
 
     return {"studentInformation": studentInformation.choices[0].message.parsed, "marks": extracted_tables}
