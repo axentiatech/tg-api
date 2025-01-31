@@ -120,7 +120,7 @@ async def evaluate(payload: Payload):
 
             if is_multiple_grading_scale.choices[0].message.parsed.is_multiple_grading_scale:
                 raise HTTPException(
-                    status_code=500, detail="We are not able to process this table")
+                    status_code=500, detail="We are not able to process this transcript")
 
             marks_table = client.beta.chat.completions.parse(
                 model="gpt-4o",
